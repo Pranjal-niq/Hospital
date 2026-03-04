@@ -1,52 +1,35 @@
 import { NextResponse } from "next/server"
-import path from "path"
-import ExcelJS from "exceljs"
+import { GoogleSpreadsheet } from "google-spreadsheet"
+import { JWT } from "google-auth-library"
 
-export const runtime = "nodejs"
+const serviceAccountAuth = new JWT({
+  email: process.env.GOOGLE_SERVICE_EMAIL,
+  key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+})
 
-const filePath = path.join(process.cwd(), "data", "bookings.xlsx")
+const doc = new GoogleSpreadsheet(
+  process.env.GOOGLE_SHEET_ID!,
+  serviceAccountAuth
+)
 
-export async function GET(){
+export async function GET() {
 
-  const workbook = new ExcelJS.Workbook()
+  await doc.loadInfo()
 
-  await workbook.xlsx.readFile(filePath)
+  const sheet = doc.sheetsByIndex[0]
 
-  const sheet = workbook.getWorksheet("Bookings")
+  const rows = await sheet.getRows()
 
-  if(!sheet) return NextResponse.json([])
+  const today = new Date().toLocaleDateString()
 
-  const rows:any[] = []
+  const bookings = rows
+    .filter((r:any) => r.get("Date") === today)
+    .map((r:any) => ({
+      bookingNo: r.get("Token"),
+      doctor: r.get("Doctor"),
+      patient: r.get("Patient")
+    }))
 
-  const today = new Date().toISOString().split("T")[0]
-
-  sheet.eachRow((row,rowNumber)=>{
-
-    if(rowNumber === 1) return
-
-    const bookingNo = row.getCell(1).value
-    const doctor = row.getCell(2).value
-    const patient = row.getCell(3).value
-    const createdAt = row.getCell(7).value
-
-    if(!createdAt) return
-
-    const bookingDate = new Date(createdAt.toString())
-      .toISOString()
-      .split("T")[0]
-
-    if(bookingDate === today){
-
-      rows.push({
-        bookingNo,
-        doctor,
-        patient
-      })
-
-    }
-
-  })
-
-  return NextResponse.json(rows)
-
+  return NextResponse.json(bookings)
 }
