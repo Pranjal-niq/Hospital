@@ -1,96 +1,50 @@
-import { NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
-import ExcelJS from "exceljs";
-import { nanoid } from "nanoid";
+import { NextResponse } from "next/server"
+import { GoogleSpreadsheet } from "google-spreadsheet"
+import { JWT } from "google-auth-library"
+import { nanoid } from "nanoid"
 
-export const runtime = "nodejs";
+const serviceAccountAuth = new JWT({
+  email: process.env.GOOGLE_SERVICE_EMAIL,
+  key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+})
 
-const dataDir = path.join(process.cwd(), "data");
-const filePath = path.join(dataDir, "bookings.xlsx");
-
-async function ensureWorkbook(): Promise<ExcelJS.Workbook> {
-  const workbook = new ExcelJS.Workbook();
-
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-
-  if (fs.existsSync(filePath)) {
-    await workbook.xlsx.readFile(filePath);
-  } else {
-    const sheet = workbook.addWorksheet("Bookings");
-
-    sheet.addRow([
-      "Booking No",
-      "Doctor",
-      "Patient Name",
-      "Phone",
-      "Email",
-      "Appointment Time",
-      "Created At",
-    ]);
-
-    await workbook.xlsx.writeFile(filePath);
-  }
-
-  return workbook;
-}
+const doc = new GoogleSpreadsheet(
+  process.env.GOOGLE_SHEET_ID!,
+  serviceAccountAuth
+)
 
 export async function POST(req: Request) {
+
   try {
-    const data = await req.json();
 
-    const { doctor, name, phone, email, datetime } = data;
+    const { doctor, name, phone } = await req.json()
 
-    if (!doctor || !name || !phone) {
-      return NextResponse.json(
-        { error: "doctor, name and phone are required" },
-        { status: 400 },
-      );
-    }
+    const bookingNo = `APT-${nanoid(4).toUpperCase()}`
 
-    const workbook = await ensureWorkbook();
+    await doc.loadInfo()
 
-    let sheet = workbook.getWorksheet("Bookings");
+    const sheet = doc.sheetsByIndex[0]
 
-    if (!sheet) {
-      sheet = workbook.addWorksheet("Bookings");
+    await sheet.addRow({
+      Date: new Date().toLocaleDateString(),
+      Token: bookingNo,
+      Doctor: doctor,
+      Patient: name,
+      Phone: phone
+    })
 
-      sheet.addRow([
-        "Booking No",
-        "Doctor",
-        "Patient Name",
-        "Phone",
-        "Email",
-        "Appointment Time",
-        "Created At",
-      ]);
-    }
+    return NextResponse.json({ bookingNo })
 
-    const bookingNo = `APT-${nanoid(6).toUpperCase()}`;
-
-    const createdAt = new Date().toISOString();
-
-    sheet.addRow([
-      bookingNo,
-      doctor,
-      name,
-      phone,
-      email || "",
-      datetime || "",
-      createdAt,
-    ]);
-
-    await workbook.xlsx.writeFile(filePath);
-
-    return NextResponse.json({ bookingNo });
   } catch (err) {
-    console.error("booking API error", err);
+
+    console.error("BOOKING ERROR:", err)
 
     return NextResponse.json(
-      { error: "internal server error" },
-      { status: 500 },
-    );
+      { error: "booking failed" },
+      { status: 500 }
+    )
+
   }
+
 }
