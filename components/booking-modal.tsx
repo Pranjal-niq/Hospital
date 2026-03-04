@@ -9,12 +9,13 @@ export function BookingModal() {
   const [open, setOpen] = useState(false)
   const [bookingNo, setBookingNo] = useState<string | null>(null)
   const [patientData, setPatientData] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
 
   const { register, handleSubmit, reset } = useForm()
 
   useEffect(() => {
 
-    const listener = (e:any) => {
+    const listener = (e: any) => {
       setDoctor(e.detail)
       setOpen(true)
       setBookingNo(null)
@@ -26,45 +27,52 @@ export function BookingModal() {
 
   }, [])
 
-  const onSubmit = async (data:any) => {
+  const onSubmit = async (data: any) => {
 
-    const res = await fetch("/api/bookings", {
-      method:"POST",
-      headers:{
-        "Content-Type":"application/json"
-      },
-      body: JSON.stringify({
-        ...data,
-        doctor: doctor.name
+    try {
+
+      setLoading(true)
+
+      const res = await fetch("/api/bookings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          ...data,
+          doctor: doctor.name
+        })
       })
-    })
 
-    const result = await res.json()
+      const result = await res.json()
 
-    if(result.bookingNo){
+      if (result.bookingNo) {
 
-      setBookingNo(result.bookingNo)
-      setPatientData(data)
+        setBookingNo(result.bookingNo)
+        setPatientData(data)
 
-      const message = `New Appointment
+        reset()
 
-Token: ${result.bookingNo}
-Doctor: ${doctor.name}
-Patient: ${data.name}
-Phone: ${data.phone}`
+      } else {
 
-      const whatsappURL =
-        "https://wa.me/919XXXXXXXXX?text=" +
-        encodeURIComponent(message)
+        alert("Booking failed. Please try again.")
 
-      window.open(whatsappURL, "_blank")
+      }
 
-      reset()
+    } catch (error) {
+
+      console.error(error)
+      alert("Server error. Please try again.")
+
+    } finally {
+
+      setLoading(false)
+
     }
 
   }
 
-  if(!open) return null
+  if (!open) return null
 
   return (
 
@@ -96,9 +104,10 @@ Phone: ${data.phone}`
 
             <button
               type="submit"
+              disabled={loading}
               className="w-full bg-primary text-white p-2 rounded"
             >
-              Confirm Booking
+              {loading ? "Booking..." : "Confirm Booking"}
             </button>
 
           </form>
@@ -110,7 +119,7 @@ Phone: ${data.phone}`
           <div className="space-y-3 text-center">
 
             <p className="text-green-600 text-lg font-semibold">
-              ✅ Appointment Request Submitted
+              ✅ Appointment Confirmed
             </p>
 
             <p>
@@ -138,7 +147,10 @@ Phone: ${data.phone}`
         )}
 
         <button
-          onClick={()=>setOpen(false)}
+          onClick={() => {
+            setOpen(false)
+            setBookingNo(null)
+          }}
           className="mt-4 text-sm text-gray-500 w-full"
         >
           Close
