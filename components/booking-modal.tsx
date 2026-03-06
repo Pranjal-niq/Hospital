@@ -1,7 +1,7 @@
-"use client"
+"use client";
 
-import { useEffect, useState } from "react"
-import { useForm } from "react-hook-form"
+import { useEffect, useState } from "react";
+import { useForm } from "react-hook-form";
 
 export function BookingModal() {
 
@@ -10,33 +10,45 @@ export function BookingModal() {
   const [bookingNo, setBookingNo] = useState<string | null>(null)
   const [patientData, setPatientData] = useState<any>(null)
   const [loading, setLoading] = useState(false)
+  const [estimatedWait, setEstimatedWait] = useState<number | null>(null)
+  const [availability, setAvailability] = useState<any>({})
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const { register, handleSubmit, reset } = useForm()
 
   useEffect(() => {
 
-    const listener = (e: any) => {
+    const listener = async (e:any) => {
+
       setDoctor(e.detail)
       setOpen(true)
       setBookingNo(null)
+      setErrorMessage(null)
+
+      const res = await fetch("/api/doctor-availability",{cache:"no-store"})
+      const data = await res.json()
+
+      setAvailability(data)
+
     }
 
-    window.addEventListener("open-booking", listener)
+    window.addEventListener("open-booking",listener)
 
-    return () => window.removeEventListener("open-booking", listener)
+    return () => window.removeEventListener("open-booking",listener)
 
-  }, [])
+  },[])
 
-  const onSubmit = async (data: any) => {
+  const onSubmit = async (data:any) => {
 
     try {
 
       setLoading(true)
+      setErrorMessage(null)
 
-      const res = await fetch("/api/bookings", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
+      const res = await fetch("/api/bookings",{
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json"
         },
         body: JSON.stringify({
           ...data,
@@ -46,23 +58,42 @@ export function BookingModal() {
 
       const result = await res.json()
 
-      if (result.bookingNo) {
+      if(!res.ok){
+
+        if(result.error === "Doctor not available today"){
+
+          setErrorMessage("Doctor is not available today. Please try another doctor.")
+
+          return
+
+        }
+
+        setErrorMessage("Booking failed. Please try again.")
+
+        return
+
+      }
+
+      if(result.bookingNo){
 
         setBookingNo(result.bookingNo)
         setPatientData(data)
 
+        const tokenNumber = parseInt(result.bookingNo.split("-")[1])
+        const avgConsultationTime = 5
+
+        const wait = (tokenNumber - 1) * avgConsultationTime
+
+        setEstimatedWait(wait)
+
         reset()
-
-      } else {
-
-        alert("Booking failed. Please try again.")
 
       }
 
-    } catch (error) {
+    } catch(error){
 
       console.error(error)
-      alert("Server error. Please try again.")
+      setErrorMessage("Server error. Please try again.")
 
     } finally {
 
@@ -72,7 +103,26 @@ export function BookingModal() {
 
   }
 
-  if (!open) return null
+  if(!open) return null
+
+  const whatsappNumber = patientData?.whatsapp || patientData?.phone
+
+  const whatsappMessage = `
+Patil Multispeciality Hospital
+
+Appointment Confirmed
+
+Token: ${bookingNo}
+Doctor: ${doctor?.name}
+Patient: ${patientData?.name}
+
+Estimated Wait: ${estimatedWait} minutes
+`
+
+  const whatsappURL =
+  `https://api.whatsapp.com/send?phone=91${whatsappNumber}&text=${encodeURIComponent(whatsappMessage)}`
+
+  const doctorAvailable = availability[doctor?.name] ?? true
 
   return (
 
@@ -88,6 +138,22 @@ export function BookingModal() {
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
 
+            {!doctorAvailable && (
+
+              <p className="text-red-600 text-sm font-medium">
+                Doctor is not available today
+              </p>
+
+            )}
+
+            {errorMessage && (
+
+              <p className="text-red-600 text-sm font-medium">
+                {errorMessage}
+              </p>
+
+            )}
+
             <input
               {...register("name")}
               placeholder="Patient Name"
@@ -102,10 +168,24 @@ export function BookingModal() {
               className="w-full border rounded p-2"
             />
 
+            <input
+              {...register("whatsapp")}
+              placeholder="WhatsApp Number (optional)"
+              className="w-full border rounded p-2"
+            />
+
+            <p className="text-xs text-gray-500">
+              Enter WhatsApp number if you want booking confirmation on WhatsApp.
+            </p>
+
             <button
               type="submit"
-              disabled={loading}
-              className="w-full bg-primary text-white p-2 rounded"
+              disabled={loading || !doctorAvailable}
+              className={`w-full p-2 rounded text-white ${
+                doctorAvailable
+                ? "bg-primary"
+                : "bg-gray-400 cursor-not-allowed"
+              }`}
             >
               {loading ? "Booking..." : "Confirm Booking"}
             </button>
@@ -138,18 +218,40 @@ export function BookingModal() {
               <strong>Phone:</strong> {patientData?.phone}
             </p>
 
+            {estimatedWait !== null && (
+
+              <p className="text-sm text-blue-600 font-medium">
+                Estimated Waiting Time: {estimatedWait} minutes
+              </p>
+
+            )}
+
             <p className="text-sm text-gray-500">
               Please take a screenshot of this booking and show it at reception.
             </p>
+
+            {whatsappNumber && (
+
+              <a
+                href={whatsappURL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block w-full bg-green-500 text-white p-2 rounded"
+              >
+                Send Token via WhatsApp
+              </a>
+
+            )}
 
           </div>
 
         )}
 
         <button
-          onClick={() => {
+          onClick={()=>{
             setOpen(false)
             setBookingNo(null)
+            setErrorMessage(null)
           }}
           className="mt-4 text-sm text-gray-500 w-full"
         >
@@ -161,4 +263,5 @@ export function BookingModal() {
     </div>
 
   )
+
 }

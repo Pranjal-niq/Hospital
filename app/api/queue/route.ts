@@ -6,6 +6,13 @@ export const runtime = "nodejs"
 
 const filePath = path.join(process.cwd(),"data","queue.json")
 
+const normalize = (name:string)=>
+  name.replace("Dr.","").replace("Dr ","").trim()
+
+function cleanDoctor(name:string){
+  return `Dr ${normalize(name)}`
+}
+
 function readQueue(){
 
   if(!fs.existsSync(filePath)){
@@ -20,7 +27,6 @@ function readQueue(){
 
   const today = new Date().toISOString().split("T")[0]
 
-  // AUTO RESET IF DATE CHANGED
   if(data.date !== today){
 
     const resetData = {
@@ -60,7 +66,9 @@ export async function POST(req:Request){
 
   const queueData = readQueue()
 
-  queueData.doctors[doctor] = token
+  const clean = cleanDoctor(doctor)
+
+  queueData.doctors[clean] = token
 
   writeQueue(queueData)
 
@@ -77,11 +85,17 @@ export async function DELETE(req:Request){
   const queueData = readQueue()
 
   if(doctor){
-    queueData.doctors[doctor] = null
+
+    const clean = cleanDoctor(doctor)
+
+    queueData.doctors[clean] = null
+
   }else{
+
     Object.keys(queueData.doctors).forEach(d=>{
       queueData.doctors[d] = null
     })
+
   }
 
   writeQueue(queueData)

@@ -4,28 +4,44 @@ import { useEffect, useState } from "react"
 
 type QueueType = Record<string, string | null>
 
+type AvailabilityType = Record<
+  string,
+  {
+    available: boolean
+  }
+>
+
 export default function OpdQueue(){
 
   const [queue,setQueue] = useState<QueueType>({})
+  const [availability,setAvailability] = useState<AvailabilityType>({})
 
-  const fetchQueue = async ()=>{
+  const fetchData = async ()=>{
 
-    const res = await fetch("/api/queue")
-    const data = await res.json()
+    const [queueRes,availabilityRes] = await Promise.all([
+      fetch("/api/queue"),
+      fetch("/api/doctor-availability")
+    ])
 
-    setQueue(data)
+    const queueData = await queueRes.json()
+    const availabilityData = await availabilityRes.json()
+
+    setQueue(queueData)
+    setAvailability(availabilityData)
 
   }
 
   useEffect(()=>{
 
-    fetchQueue()
+    fetchData()
 
-    const interval = setInterval(fetchQueue,5000)
+    const interval = setInterval(fetchData,5000)
 
     return ()=>clearInterval(interval)
 
   },[])
+
+  const doctors = Object.keys(availability)
 
   return(
 
@@ -39,24 +55,30 @@ export default function OpdQueue(){
 
         <div className="grid md:grid-cols-4 gap-6">
 
-          {Object.entries(queue).map(([doctor,token])=>(
+          {doctors.map((doctor)=>{
 
-            <div
-              key={doctor}
-              className="bg-white border rounded-xl p-6 text-center shadow-sm"
-            >
+            const token = queue[doctor]
 
-              <h3 className="font-semibold mb-3">
-                {doctor}
-              </h3>
+            return(
 
-              <p className="text-3xl font-bold text-accent">
-                {token ?? "Waiting"}
-              </p>
+              <div
+                key={doctor}
+                className="bg-white border rounded-xl p-6 text-center shadow-sm"
+              >
 
-            </div>
+                <h3 className="font-semibold mb-3">
+                  {doctor}
+                </h3>
 
-          ))}
+                <p className="text-3xl font-bold text-green-600">
+                  {token ?? "Waiting"}
+                </p>
+
+              </div>
+
+            )
+
+          })}
 
         </div>
 

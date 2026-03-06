@@ -11,102 +11,180 @@ type Booking = {
 
 type QueueType = Record<string, string | null>
 
-export default function Dashboard() {
+type AvailabilityType = Record<
+  string,
+  {
+    available: boolean
+  }
+>
+
+export default function Dashboard(){
 
   const router = useRouter()
 
-  const [bookings, setBookings] = useState<Booking[]>([])
-  const [queue, setQueue] = useState<QueueType>({})
+  const [bookings,setBookings] = useState<Booking[]>([])
+  const [queue,setQueue] = useState<QueueType>({})
+  const [availability,setAvailability] = useState<AvailabilityType>({})
 
-  useEffect(() => {
+  const [username,setUsername] = useState("")
+  const [role,setRole] = useState("")
 
-    const auth = localStorage.getItem("adminAuth")
+  const normalize = (name:string)=>
+    name.replace("Dr.","").replace("Dr ","").trim().toLowerCase()
 
-    if (auth !== "true") {
+  useEffect(()=>{
+
+    loadBookings()
+    loadQueue()
+    loadAvailability()
+    loadUser()
+
+    const interval = setInterval(()=>{
+
+      loadBookings()
+      loadQueue()
+
+    },2000)
+
+    return ()=>clearInterval(interval)
+
+  },[])
+
+  const loadUser = async ()=>{
+
+    const res = await fetch("/api/me")
+
+    if(!res.ok){
       router.push("/admin/login")
       return
     }
 
-    loadBookings()
-    loadQueue()
+    const data = await res.json()
 
-  }, [])
+    setUsername(data.username)
+    setRole(data.role)
 
-  const loadBookings = async () => {
+  }
 
-    const res = await fetch("/api/today-bookings")
+  const logout = async ()=>{
+
+    await fetch("/api/logout")
+
+    router.push("/admin/login")
+
+  }
+
+  const loadBookings = async ()=>{
+
+    const res = await fetch("/api/today-bookings",{cache:"no-store"})
     const data = await res.json()
 
     setBookings(data)
 
   }
 
-  const loadQueue = async () => {
+  const loadQueue = async ()=>{
 
-    const res = await fetch("/api/queue")
+    const res = await fetch("/api/queue",{cache:"no-store"})
     const data = await res.json()
 
     setQueue(data)
 
   }
 
-  // ANNOUNCEMENT FUNCTION (PATIENT NAME)
+  const loadAvailability = async ()=>{
 
-const speakPatient = (patient: string, doctor: string) => {
+    const res = await fetch("/api/doctor-availability",{cache:"no-store"})
+    const data = await res.json()
 
-  const speak = () => {
+    setAvailability(data)
+
+  }
+
+  const toggleDoctor = async (doctor:string)=>{
+
+    if(role === "doctor" && !doctor.toLowerCase().includes(username)){
+      alert("You can only control your own availability")
+      return
+    }
+
+    const current = availability[doctor]?.available ?? true
+
+    const res = await fetch("/api/doctor-availability",{
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({
+        doctor,
+        available: !current
+      })
+    })
+
+    if(res.ok){
+
+      setAvailability(prev=>({
+        ...prev,
+        [doctor]:{ available: !current }
+      }))
+
+    }
+
+  }
+
+  const clearDoctorBookings = async (doctor:string)=>{
+
+    const confirmClear = confirm(
+      `Are you sure you want to clear today's bookings for ${doctor}?`
+    )
+
+    if(!confirmClear) return
+
+    await fetch("/api/clear-doctor-bookings",{
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({doctor})
+    })
+
+    loadBookings()
+    loadQueue()
+
+  }
+
+  const speakPatient = (patient:string,doctor:string)=>{
 
     const voices = window.speechSynthesis.getVoices()
 
     const voice =
-      voices.find(v => v.lang === "hi-IN") ||
-      voices.find(v => v.lang.includes("en-IN")) ||
+      voices.find(v=>v.lang==="hi-IN") ||
+      voices.find(v=>v.lang.includes("en-IN")) ||
       voices[0]
 
-    const cleanDoctor = doctor.replace("Dr.", "").replace("Dr ", "")
+    const cleanDoctor = doctor.replace("Dr.","").replace("Dr ","")
 
     const marathiText =
       `${patient}. कृपया डॉक्टर ${cleanDoctor} यांच्या केबिनमध्ये या.`
 
-    const hindiText =
-      `${patient}. कृपया डॉक्टर ${cleanDoctor} के केबिन में आएं.`
-
-    const marathiSpeech = new SpeechSynthesisUtterance(marathiText)
-    marathiSpeech.voice = voice
-    marathiSpeech.rate = 0.9
-
-    const hindiSpeech = new SpeechSynthesisUtterance(hindiText)
-    hindiSpeech.voice = voice
-    hindiSpeech.rate = 0.9
+    const speech = new SpeechSynthesisUtterance(marathiText)
+    speech.voice = voice
 
     window.speechSynthesis.cancel()
-
-    window.speechSynthesis.speak(marathiSpeech)
-
-    setTimeout(() => {
-      window.speechSynthesis.speak(hindiSpeech)
-    }, 3500)
+    window.speechSynthesis.speak(speech)
 
   }
 
-  if (speechSynthesis.getVoices().length === 0) {
-    speechSynthesis.onvoiceschanged = speak
-  } else {
-    speak()
-  }
+  const callToken = async (doctor:string,token:string,patient:string)=>{
 
-}
+    speakPatient(patient,doctor)
 
-  const callToken = async (doctor: string, token: string, patient: string) => {
-
-    speakPatient(patient, doctor)
-
-    await fetch("/api/queue", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
+    await fetch("/api/queue",{
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json"
       },
-      body: JSON.stringify({
+      body:JSON.stringify({
         doctor,
         token
       })
@@ -116,39 +194,37 @@ const speakPatient = (patient: string, doctor: string) => {
 
   }
 
-  const finishToken = async (doctor: string, items: Booking[]) => {
+  const finishToken = async (doctor:string,items:Booking[])=>{
 
     const currentToken = queue[doctor]
 
     const currentIndex = items.findIndex(
-      (b) => b.bookingNo === currentToken
+      b=>b.bookingNo===currentToken
     )
 
-    const nextPatient = items[currentIndex + 1]
+    const nextPatient = items[currentIndex+1]
 
-    if (nextPatient) {
+    if(nextPatient){
 
-      speakPatient(nextPatient.patient, doctor)
-
-      await fetch("/api/queue", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
+      await fetch("/api/queue",{
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json"
         },
-        body: JSON.stringify({
+        body:JSON.stringify({
           doctor,
-          token: nextPatient.bookingNo
+          token:nextPatient.bookingNo
         })
       })
 
-    } else {
+    }else{
 
-      await fetch("/api/queue", {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json"
+      await fetch("/api/queue",{
+        method:"DELETE",
+        headers:{
+          "Content-Type":"application/json"
         },
-        body: JSON.stringify({
+        body:JSON.stringify({
           doctor
         })
       })
@@ -159,78 +235,107 @@ const speakPatient = (patient: string, doctor: string) => {
 
   }
 
-  const resetAll = async () => {
+  const resetAll = async ()=>{
 
-    await fetch("/api/queue", {
-      method: "DELETE",
-      headers: {
-        "Content-Type": "application/json"
+    await fetch("/api/queue",{
+      method:"DELETE",
+      headers:{
+        "Content-Type":"application/json"
       },
-      body: JSON.stringify({})
+      body:JSON.stringify({})
     })
 
     loadQueue()
 
   }
 
-  const grouped = bookings.reduce((acc: Record<string, Booking[]>, booking) => {
+  const doctors = Object.keys(availability)
 
-    if (!acc[booking.doctor]) {
-      acc[booking.doctor] = []
-    }
+  return(
 
-    acc[booking.doctor].push(booking)
-
-    return acc
-
-  }, {})
-
-  return (
-
-    <div className="max-w-6xl mx-auto py-20 space-y-12">
+    <div className="max-w-6xl mx-auto py-16 space-y-8">
 
       <div className="flex justify-between items-center">
 
-        <h1 className="text-2xl font-bold">
+        <h1 className="text-xl font-bold">
           Reception Dashboard
         </h1>
 
-        <button
-          onClick={resetAll}
-          className="bg-red-600 text-white px-4 py-2 rounded"
-        >
-          Reset All
-        </button>
+        <div className="flex items-center gap-4">
+
+          <span className="text-sm text-gray-600">
+            Logged in as: {username} ({role})
+          </span>
+
+          <button
+            onClick={logout}
+            className="bg-gray-800 text-white px-3 py-1 rounded text-sm"
+          >
+            Logout
+          </button>
+
+          {role === "reception" && (
+
+            <button
+              onClick={resetAll}
+              className="bg-red-600 text-white px-3 py-1.5 rounded text-sm"
+            >
+              Reset All
+            </button>
+
+          )}
+
+        </div>
 
       </div>
 
-      {Object.entries(grouped).map(([doctor, items]) => {
+      {doctors.map((doctor)=>{
+
+        const items = bookings.filter(
+          b=>normalize(b.doctor)===normalize(doctor)
+        )
 
         const currentToken = queue[doctor]
+        const isAvailable = availability[doctor]?.available ?? true
 
-        return (
+        return(
 
-          <div key={doctor} className="border rounded-xl p-6 space-y-6">
+          <div key={doctor} className="border rounded-xl p-4 space-y-4">
 
-            <h2 className="text-xl font-semibold">
-              {doctor}
-            </h2>
+            <div className="flex justify-between items-center">
 
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
+              <h2 className="text-lg font-semibold">
+                {doctor}
+              </h2>
 
-              <p className="text-sm text-gray-500">
+              <button
+                onClick={()=>toggleDoctor(doctor)}
+                className={`px-3 py-1 rounded text-xs font-semibold ${
+                  isAvailable
+                    ? "bg-green-100 text-green-700"
+                    : "bg-red-100 text-red-700"
+                }`}
+              >
+                {isAvailable ? "Available" : "Not Available"}
+              </button>
+
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+
+              <p className="text-xs text-gray-500">
                 Now Serving
               </p>
 
-              <p className="text-3xl font-bold text-blue-600">
+              <p className="text-2xl font-bold text-blue-600">
                 {currentToken ?? "Waiting"}
               </p>
 
               {currentToken && (
 
                 <button
-                  onClick={() => finishToken(doctor, items)}
-                  className="mt-4 bg-green-600 text-white px-4 py-2 rounded"
+                  onClick={()=>finishToken(doctor,items)}
+                  className="mt-2 bg-green-600 text-white px-3 py-1 rounded text-sm"
                 >
                   Finish Consultation
                 </button>
@@ -239,29 +344,37 @@ const speakPatient = (patient: string, doctor: string) => {
 
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-2">
 
-              <p className="font-medium">
+              <p className="text-sm font-medium">
                 Waiting Patients
               </p>
 
+              {items.length===0 &&(
+
+                <p className="text-xs text-gray-400">
+                  No bookings yet
+                </p>
+
+              )}
+
               {items
-                .filter((b) => b.bookingNo !== currentToken)
-                .map((b) => (
+                .filter(b=>b.bookingNo!==currentToken)
+                .map(b=>(
 
                   <button
                     key={b.bookingNo}
-                    onClick={() => callToken(b.doctor, b.bookingNo, b.patient)}
-                    className="w-full border p-4 rounded flex justify-between items-center hover:bg-gray-50 transition"
+                    onClick={()=>callToken(b.doctor,b.bookingNo,b.patient)}
+                    className="w-full border px-3 py-2 rounded flex justify-between items-center hover:bg-gray-50 transition"
                   >
 
-                    <div>
+                    <div className="text-left">
 
-                      <p className="font-semibold">
+                      <p className="text-sm font-semibold">
                         {b.patient}
                       </p>
 
-                      <p className="text-sm text-gray-500">
+                      <p className="text-xs text-gray-500">
                         {b.bookingNo}
                       </p>
 
@@ -276,6 +389,17 @@ const speakPatient = (patient: string, doctor: string) => {
                 ))}
 
             </div>
+
+            {role === "reception" && (
+
+              <button
+                onClick={()=>clearDoctorBookings(doctor)}
+                className="bg-red-500 text-white px-3 py-1 rounded text-xs"
+              >
+                Clear Today's Bookings
+              </button>
+
+            )}
 
           </div>
 

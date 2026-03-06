@@ -66,7 +66,7 @@ export function AppointmentSection() {
                 asChild
                 variant="outline"
                 size="lg"
-                className="h-14 rounded-xl border-white/30 text-white hover:bg-white/10"
+                className="h-14 rounded-xl border-white/30 text-white hover:bg-accent/10"
               >
                 <a href="#doctors">
                   View Doctors

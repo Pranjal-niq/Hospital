@@ -1,35 +1,53 @@
 import { NextResponse } from "next/server"
-import { GoogleSpreadsheet } from "google-spreadsheet"
-import { JWT } from "google-auth-library"
+import fs from "fs"
+import path from "path"
+import * as XLSX from "xlsx"
 
-const serviceAccountAuth = new JWT({
-  email: process.env.GOOGLE_SERVICE_EMAIL,
-  key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-})
-
-const doc = new GoogleSpreadsheet(
-  process.env.GOOGLE_SHEET_ID!,
-  serviceAccountAuth
-)
+type ExcelRow = {
+  Token: string
+  Doctor: string
+  Patient: string
+  Date?: string
+}
 
 export async function GET() {
 
-  await doc.loadInfo()
+  try {
 
-  const sheet = doc.sheetsByIndex[0]
+    const bookingsDir = path.join(process.cwd(), "data", "bookings")
 
-  const rows = await sheet.getRows()
+    const today = new Date().toISOString().split("T")[0]
 
-  const today = new Date().toLocaleDateString()
+    const filePath = path.join(bookingsDir, `${today}.xlsx`)
 
-  const bookings = rows
-    .filter((r:any) => r.get("Date") === today)
-    .map((r:any) => ({
-      bookingNo: r.get("Token"),
-      doctor: r.get("Doctor"),
-      patient: r.get("Patient")
+    if (!fs.existsSync(filePath)) {
+      return NextResponse.json([])
+    }
+
+    const fileBuffer = fs.readFileSync(filePath)
+
+    const workbook = XLSX.read(fileBuffer, { type: "buffer" })
+
+    const sheetName = workbook.SheetNames[0]
+
+    const sheet = workbook.Sheets[sheetName]
+
+    const rows = XLSX.utils.sheet_to_json<ExcelRow>(sheet)
+
+    const bookings = rows.map((r) => ({
+      bookingNo: r.Token,
+      doctor: r.Doctor,
+      patient: r.Patient
     }))
 
-  return NextResponse.json(bookings)
+    return NextResponse.json(bookings)
+
+  } catch (error) {
+
+    console.error("TODAY BOOKINGS ERROR:", error)
+
+    return NextResponse.json([])
+
+  }
+
 }
