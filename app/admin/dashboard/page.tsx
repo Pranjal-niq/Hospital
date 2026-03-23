@@ -35,7 +35,6 @@ export default function Dashboard(){
   const [username,setUsername] = useState("")
   const [role,setRole] = useState("")
 
-  // Walk-in state
   const [walkInOpen,setWalkInOpen] = useState(false)
   const [walkInForm,setWalkInForm] = useState<WalkInForm>({
     doctor:"",
@@ -49,7 +48,6 @@ export default function Dashboard(){
     name.replace("Dr.","").replace("Dr ","").trim().toLowerCase()
 
   useEffect(()=>{
-
     loadBookings()
     loadQueue()
     loadAvailability()
@@ -61,22 +59,17 @@ export default function Dashboard(){
     },2000)
 
     return ()=>clearInterval(interval)
-
   },[])
 
   const loadUser = async ()=>{
-
     const res = await fetch("/api/me")
-
     if(!res.ok){
       router.push("/admin/login")
       return
     }
-
     const data = await res.json()
     setUsername(data.username)
     setRole(data.role)
-
   }
 
   const logout = async ()=>{
@@ -104,7 +97,8 @@ export default function Dashboard(){
 
   const toggleDoctor = async (doctor:string)=>{
 
-    if(role === "doctor" && !doctor.toLowerCase().includes(username)){
+    // Doctor can only toggle their own availability
+    if(role === "doctor" && !normalize(doctor).includes(username.toLowerCase())){
       alert("You can only control your own availability")
       return
     }
@@ -123,15 +117,12 @@ export default function Dashboard(){
         [doctor]:{ available: !current }
       }))
     }
-
   }
 
   const clearDoctorBookings = async (doctor:string)=>{
-
     const confirmClear = confirm(
       `Are you sure you want to clear today's bookings for ${doctor}?`
     )
-
     if(!confirmClear) return
 
     await fetch("/api/clear-doctor-bookings",{
@@ -142,50 +133,36 @@ export default function Dashboard(){
 
     loadBookings()
     loadQueue()
-
   }
 
   const speakPatient = (patient:string,doctor:string)=>{
-
     const voices = window.speechSynthesis.getVoices()
-
     const voice =
       voices.find(v=>v.lang==="hi-IN") ||
       voices.find(v=>v.lang.includes("en-IN")) ||
       voices[0]
 
     const cleanDoctor = doctor.replace("Dr.","").replace("Dr ","")
-
-    const marathiText =
-      `${patient}. कृपया डॉक्टर ${cleanDoctor} यांच्या केबिनमध्ये या.`
-
+    const marathiText = `${patient}. कृपया डॉक्टर ${cleanDoctor} यांच्या केबिनमध्ये या.`
     const speech = new SpeechSynthesisUtterance(marathiText)
     speech.voice = voice
-
     window.speechSynthesis.cancel()
     window.speechSynthesis.speak(speech)
-
   }
 
   const callToken = async (doctor:string,token:string,patient:string)=>{
-
     speakPatient(patient,doctor)
-
     await fetch("/api/queue",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({ doctor, token })
     })
-
     loadQueue()
-
   }
 
   const finishToken = async (doctor:string,items:Booking[])=>{
-
     const currentToken = queue[doctor]
 
-    // Mark current patient as done — removes from waiting list
     if(currentToken){
       await fetch("/api/complete-booking",{
         method:"POST",
@@ -194,7 +171,6 @@ export default function Dashboard(){
       })
     }
 
-    // Find next waiting patient
     const currentIndex = items.findIndex(b=>b.bookingNo===currentToken)
     const nextPatient = items[currentIndex+1]
 
@@ -214,22 +190,17 @@ export default function Dashboard(){
 
     loadQueue()
     loadBookings()
-
   }
 
   const resetAll = async ()=>{
-
     await fetch("/api/queue",{
       method:"DELETE",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({})
     })
-
     loadQueue()
-
   }
 
-  // WALK-IN BOOKING
   const openWalkIn = (doctor:string)=>{
     setWalkInForm({ doctor, name:"", phone:"" })
     setWalkInToken(null)
@@ -237,14 +208,12 @@ export default function Dashboard(){
   }
 
   const submitWalkIn = async ()=>{
-
     if(!walkInForm.name.trim()){
       alert("Please enter patient name")
       return
     }
 
     try{
-
       setWalkInLoading(true)
 
       const res = await fetch("/api/bookings",{
@@ -273,10 +242,16 @@ export default function Dashboard(){
     }finally{
       setWalkInLoading(false)
     }
-
   }
 
-  const doctors = Object.keys(availability)
+  // KEY FIX — doctors list filtered by role
+  // Reception sees all doctors
+  // Doctor sees only their own card
+  const doctors = role === "doctor"
+    ? Object.keys(availability).filter(d =>
+        normalize(d).includes(username.toLowerCase())
+      )
+    : Object.keys(availability)
 
   return(
 
@@ -285,7 +260,9 @@ export default function Dashboard(){
       {/* HEADER */}
       <div className="flex justify-between items-center">
 
-        <h1 className="text-xl font-bold">Reception Dashboard</h1>
+        <h1 className="text-xl font-bold">
+          {role === "doctor" ? "Doctor Dashboard" : "Reception Dashboard"}
+        </h1>
 
         <div className="flex items-center gap-4">
 
@@ -335,7 +312,6 @@ export default function Dashboard(){
 
                 <h2 className="text-lg font-semibold">{doctor}</h2>
 
-                {/* WAITING COUNT BADGE */}
                 {waitingItems.length > 0 && (
                   <span className="bg-orange-100 text-orange-700 text-xs font-bold px-2 py-0.5 rounded-full">
                     {waitingItems.length} waiting
@@ -346,7 +322,6 @@ export default function Dashboard(){
 
               <div className="flex items-center gap-2">
 
-                {/* WALK-IN BUTTON */}
                 {role === "reception" && (
                   <button
                     onClick={()=>openWalkIn(doctor)}
@@ -377,7 +352,7 @@ export default function Dashboard(){
               <p className="text-xs text-gray-500">Now Serving</p>
 
               <p className="text-2xl font-bold text-blue-600">
-                {currentToken ?? "Waiting"}
+                {currentToken ?? "—"}
               </p>
 
               {currentToken && (
@@ -453,9 +428,7 @@ export default function Dashboard(){
 
           <div className="bg-white p-6 rounded-xl w-[360px] space-y-4">
 
-            <h2 className="text-lg font-bold">
-              Walk-in Patient
-            </h2>
+            <h2 className="text-lg font-bold">Walk-in Patient</h2>
 
             <p className="text-sm text-gray-500">
               Doctor: <strong>{walkInForm.doctor}</strong>
