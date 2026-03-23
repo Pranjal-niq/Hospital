@@ -9,6 +9,7 @@ export async function GET() {
       .from("bookings")
       .select("token, doctor, patient")
       .eq("date", today)
+      .eq("status", "waiting")
       .order("id", { ascending: true })
 
     if (error) {
@@ -16,14 +17,13 @@ export async function GET() {
       return NextResponse.json([])
     }
 
-    const bookings = data?.map((r) => ({
-      bookingNo: r.token,
-      doctor: r.doctor,
-      patient: r.patient
-    })) ?? []
-
-    return NextResponse.json(bookings)
-
+    return NextResponse.json(
+      data?.map(r => ({
+        bookingNo: r.token,
+        doctor: r.doctor,
+        patient: r.patient
+      })) ?? []
+    )
   } catch (error) {
     console.error("TODAY BOOKINGS ERROR:", error)
     return NextResponse.json([])
