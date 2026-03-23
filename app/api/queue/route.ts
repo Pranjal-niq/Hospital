@@ -1,105 +1,67 @@
 import { NextResponse } from "next/server"
-import fs from "fs"
-import path from "path"
+import { supabase } from "@/lib/supabase"
 
-export const runtime = "nodejs"
+const today = () => new Date().toISOString().split("T")[0]
 
-const filePath = path.join(process.cwd(),"data","queue.json")
+const normalize = (name: string) =>
+  name.replace("Dr.", "").replace("Dr ", "").trim()
 
-const normalize = (name:string)=>
-  name.replace("Dr.","").replace("Dr ","").trim()
+const cleanDoctor = (name: string) => `Dr ${normalize(name)}`
 
-function cleanDoctor(name:string){
-  return `Dr ${normalize(name)}`
-}
+export async function GET() {
+  const { data, error } = await supabase
+    .from("queue")
+    .select("doctor, token")
+    .eq("date", today())
 
-function readQueue(){
-
-  if(!fs.existsSync(filePath)){
-    return {
-      date: new Date().toISOString().split("T")[0],
-      doctors: {}
-    }
+  if (error) {
+    console.error("Queue GET error:", error)
+    return NextResponse.json({})
   }
 
-  const raw = fs.readFileSync(filePath,"utf8")
-  const data = JSON.parse(raw)
+  const result: Record<string, string | null> = {}
+  data?.forEach((row) => {
+    result[row.doctor] = row.token
+  })
 
-  const today = new Date().toISOString().split("T")[0]
-
-  if(data.date !== today){
-
-    const resetData = {
-      date: today,
-      doctors: {}
-    }
-
-    fs.writeFileSync(filePath,JSON.stringify(resetData,null,2))
-
-    return resetData
-
-  }
-
-  return data
-
+  return NextResponse.json(result)
 }
 
-function writeQueue(data:any){
-
-  fs.writeFileSync(filePath,JSON.stringify(data,null,2))
-
-}
-
-export async function GET(){
-
-  const queueData = readQueue()
-
-  return NextResponse.json(queueData.doctors)
-
-}
-
-export async function POST(req:Request){
-
-  const body = await req.json()
-
-  const { doctor, token } = body
-
-  const queueData = readQueue()
-
+export async function POST(req: Request) {
+  const { doctor, token } = await req.json()
   const clean = cleanDoctor(doctor)
 
-  queueData.doctors[clean] = token
+  const { error } = await supabase
+    .from("queue")
+    .upsert(
+      { doctor: clean, token, date: today() },
+      { onConflict: "doctor,date" }
+    )
 
-  writeQueue(queueData)
-
-  return NextResponse.json({ success:true })
-
-}
-
-export async function DELETE(req:Request){
-
-  const body = await req.json()
-
-  const { doctor } = body
-
-  const queueData = readQueue()
-
-  if(doctor){
-
-    const clean = cleanDoctor(doctor)
-
-    queueData.doctors[clean] = null
-
-  }else{
-
-    Object.keys(queueData.doctors).forEach(d=>{
-      queueData.doctors[d] = null
-    })
-
+  if (error) {
+    console.error("Queue POST error:", error)
+    return NextResponse.json({ error: "Failed to update queue" }, { status: 500 })
   }
 
-  writeQueue(queueData)
+  return NextResponse.json({ success: true })
+}
 
-  return NextResponse.json({ success:true })
+export async function DELETE(req: Request) {
+  const { doctor } = await req.json()
 
+  if (doctor) {
+    const clean = cleanDoctor(doctor)
+    await supabase
+      .from("queue")
+      .update({ token: null })
+      .eq("doctor", clean)
+      .eq("date", today())
+  } else {
+    await supabase
+      .from("queue")
+      .update({ token: null })
+      .eq("date", today())
+  }
+
+  return NextResponse.json({ success: true })
 }

@@ -1,99 +1,47 @@
 import { NextResponse } from "next/server"
-import fs from "fs"
-import path from "path"
+import { supabase } from "@/lib/supabase"
 
-const filePath = path.join(process.cwd(), "data", "doctor-availability.json")
-
-// Normalize doctor name
 const normalize = (name: string) =>
-  name.replace("Dr.", "")
-      .replace("Dr ", "")
-      .trim()
+  name.replace("Dr.", "").replace("Dr ", "").trim()
 
-// Ensure data folder + file exist
-const ensureFile = () => {
+const cleanDoctor = (name: string) => `Dr ${normalize(name)}`
 
-  const dir = path.join(process.cwd(), "data")
-
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir)
-  }
-
-  if (!fs.existsSync(filePath)) {
-    fs.writeFileSync(filePath, JSON.stringify({}, null, 2))
-  }
-
-}
-
-// GET AVAILABILITY
 export async function GET() {
+  const { data, error } = await supabase
+    .from("doctor_availability")
+    .select("doctor, available")
 
-  try {
-
-    ensureFile()
-
-    const data = fs.readFileSync(filePath, "utf-8")
-
-    return NextResponse.json(JSON.parse(data))
-
-  } catch (error) {
-
+  if (error) {
     console.error("Availability GET error:", error)
-
     return NextResponse.json({})
-
   }
 
+  const result: Record<string, { available: boolean }> = {}
+  data?.forEach((row) => {
+    result[row.doctor] = { available: row.available }
+  })
+
+  return NextResponse.json(result)
 }
 
-// UPDATE AVAILABILITY
 export async function POST(req: Request) {
+  const { doctor, available } = await req.json()
+  const clean = cleanDoctor(doctor)
 
-  try {
+  const { error } = await supabase
+    .from("doctor_availability")
+    .upsert(
+      { doctor: clean, available },
+      { onConflict: "doctor" }
+    )
 
-    ensureFile()
-
-    const { doctor, available } = await req.json()
-
-    let data: any = {}
-
-    const fileData = fs.readFileSync(filePath, "utf-8")
-
-    if (fileData) {
-      data = JSON.parse(fileData)
-    }
-
-    const cleanDoctor = normalize(doctor)
-
-    // Remove duplicate doctor entries
-    for (const key in data) {
-
-      const cleanKey = normalize(key)
-
-      if (cleanKey === cleanDoctor) {
-        delete data[key]
-      }
-
-    }
-
-    // Save doctor in consistent format
-    const doctorName = `Dr ${cleanDoctor}`
-
-    data[doctorName] = { available }
-
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2))
-
-    return NextResponse.json({ success: true })
-
-  } catch (error) {
-
+  if (error) {
     console.error("Availability POST error:", error)
-
     return NextResponse.json(
       { error: "Failed to update availability" },
       { status: 500 }
     )
-
   }
 
+  return NextResponse.json({ success: true })
 }
