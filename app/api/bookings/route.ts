@@ -9,16 +9,32 @@ export async function POST(req: Request) {
     const { doctor, name, phone } = await req.json()
     const today = new Date().toISOString().split("T")[0]
 
-    // Check doctor availability
+    // Check doctor availability + daily limit
     const { data: availData } = await supabase
       .from("doctor_availability")
-      .select("available, doctor")
+      .select("available, daily_limit, doctor")
       .ilike("doctor", `%${normalize(doctor)}%`)
       .single()
 
     if (availData?.available === false) {
       return NextResponse.json(
         { error: "Doctor not available today" },
+        { status: 400 }
+      )
+    }
+
+    // Count today's bookings for this doctor
+    const { count } = await supabase
+      .from("bookings")
+      .select("*", { count: "exact", head: true })
+      .eq("date", today)
+      .ilike("doctor", `%${normalize(doctor)}%`)
+
+    const dailyLimit = availData?.daily_limit ?? 30
+
+    if (count !== null && count >= dailyLimit) {
+      return NextResponse.json(
+        { error: "Appointments full for today" },
         { status: 400 }
       )
     }

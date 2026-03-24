@@ -15,6 +15,7 @@ type AvailabilityType = Record<
   string,
   {
     available: boolean
+    dailyLimit: number
   }
 >
 
@@ -31,7 +32,6 @@ export default function Dashboard(){
   const [bookings,setBookings] = useState<Booking[]>([])
   const [queue,setQueue] = useState<QueueType>({})
   const [availability,setAvailability] = useState<AvailabilityType>({})
-
   const [username,setUsername] = useState("")
   const [role,setRole] = useState("")
 
@@ -43,6 +43,9 @@ export default function Dashboard(){
   })
   const [walkInLoading,setWalkInLoading] = useState(false)
   const [walkInToken,setWalkInToken] = useState<string|null>(null)
+
+  const [editingLimit,setEditingLimit] = useState<string|null>(null)
+  const [limitInput,setLimitInput] = useState<number>(30)
 
   const normalize = (name:string)=>
     name.replace("Dr.","").replace("Dr ","").trim().toLowerCase()
@@ -96,8 +99,6 @@ export default function Dashboard(){
   }
 
   const toggleDoctor = async (doctor:string)=>{
-
-    // Doctor can only toggle their own availability
     if(role === "doctor" && !normalize(doctor).includes(username.toLowerCase())){
       alert("You can only control your own availability")
       return
@@ -114,8 +115,29 @@ export default function Dashboard(){
     if(res.ok){
       setAvailability(prev=>({
         ...prev,
-        [doctor]:{ available: !current }
+        [doctor]:{ ...prev[doctor], available: !current }
       }))
+    }
+  }
+
+  const saveLimit = async (doctor:string)=>{
+    if(role === "doctor" && !normalize(doctor).includes(username.toLowerCase())){
+      alert("You can only set your own limit")
+      return
+    }
+
+    const res = await fetch("/api/doctor-availability",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ doctor, dailyLimit: limitInput })
+    })
+
+    if(res.ok){
+      setAvailability(prev=>({
+        ...prev,
+        [doctor]:{ ...prev[doctor], dailyLimit: limitInput }
+      }))
+      setEditingLimit(null)
     }
   }
 
@@ -135,19 +157,36 @@ export default function Dashboard(){
     loadQueue()
   }
 
-  const speakPatient = (patient:string,doctor:string)=>{
-    const voices = window.speechSynthesis.getVoices()
-    const voice =
-      voices.find(v=>v.lang==="hi-IN") ||
-      voices.find(v=>v.lang.includes("en-IN")) ||
-      voices[0]
+  const speakPatient = (patient:string, doctor:string)=>{
+    const cleanDoctor = doctor.replace("Dr.","").replace("Dr ","").trim()
+    const marathiText =
+      `${patient}... कृपया... डॉक्टर ${cleanDoctor} यांच्या केबिनमध्ये यावे. धन्यवाद.`
 
-    const cleanDoctor = doctor.replace("Dr.","").replace("Dr ","")
-    const marathiText = `${patient}. कृपया डॉक्टर ${cleanDoctor} यांच्या केबिनमध्ये या.`
-    const speech = new SpeechSynthesisUtterance(marathiText)
-    speech.voice = voice
-    window.speechSynthesis.cancel()
-    window.speechSynthesis.speak(speech)
+    const speak = (voices: SpeechSynthesisVoice[])=>{
+      const voice =
+        voices.find(v => v.lang === "mr-IN") ||
+        voices.find(v => v.lang === "hi-IN") ||
+        voices.find(v => v.lang.includes("en-IN")) ||
+        voices[0]
+
+      const speech = new SpeechSynthesisUtterance(marathiText)
+      speech.voice = voice
+      speech.rate = 0.85
+      speech.pitch = 1
+      speech.volume = 1
+
+      window.speechSynthesis.cancel()
+      window.speechSynthesis.speak(speech)
+    }
+
+    const voices = window.speechSynthesis.getVoices()
+    if(voices.length > 0){
+      speak(voices)
+    } else {
+      window.speechSynthesis.onvoiceschanged = ()=>{
+        speak(window.speechSynthesis.getVoices())
+      }
+    }
   }
 
   const callToken = async (doctor:string,token:string,patient:string)=>{
@@ -244,9 +283,6 @@ export default function Dashboard(){
     }
   }
 
-  // KEY FIX — doctors list filtered by role
-  // Reception sees all doctors
-  // Doctor sees only their own card
   const doctors = role === "doctor"
     ? Object.keys(availability).filter(d =>
         normalize(d).includes(username.toLowerCase())
@@ -300,6 +336,11 @@ export default function Dashboard(){
         const waitingItems = items.filter(b=>b.bookingNo!==queue[doctor])
         const currentToken = queue[doctor]
         const isAvailable = availability[doctor]?.available ?? true
+        const dailyLimit = availability[doctor]?.dailyLimit ?? 30
+        const totalToday = bookings.filter(
+          b=>normalize(b.doctor)===normalize(doctor)
+        ).length
+        const spotsLeft = dailyLimit - totalToday
 
         return(
 
@@ -308,7 +349,7 @@ export default function Dashboard(){
             {/* DOCTOR HEADER */}
             <div className="flex justify-between items-center">
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
 
                 <h2 className="text-lg font-semibold">{doctor}</h2>
 
@@ -318,6 +359,16 @@ export default function Dashboard(){
                   </span>
                 )}
 
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                  spotsLeft <= 0
+                    ? "bg-red-100 text-red-700"
+                    : spotsLeft <= 5
+                    ? "bg-yellow-100 text-yellow-700"
+                    : "bg-gray-100 text-gray-600"
+                }`}>
+                  {spotsLeft <= 0 ? "Full today" : `${spotsLeft} slots left`}
+                </span>
+
               </div>
 
               <div className="flex items-center gap-2">
@@ -325,7 +376,12 @@ export default function Dashboard(){
                 {role === "reception" && (
                   <button
                     onClick={()=>openWalkIn(doctor)}
-                    className="bg-blue-600 text-white px-3 py-1 rounded text-xs font-semibold"
+                    disabled={spotsLeft <= 0}
+                    className={`px-3 py-1 rounded text-xs font-semibold text-white ${
+                      spotsLeft <= 0
+                        ? "bg-gray-400 cursor-not-allowed"
+                        : "bg-blue-600"
+                    }`}
                   >
                     + Walk-in
                   </button>
@@ -343,6 +399,57 @@ export default function Dashboard(){
                 </button>
 
               </div>
+
+            </div>
+
+            {/* DAILY LIMIT ROW */}
+            <div className="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-2">
+
+              <span className="text-xs text-gray-500">Daily limit:</span>
+
+              {editingLimit === doctor ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={limitInput}
+                    onChange={e=>setLimitInput(parseInt(e.target.value))}
+                    className="w-16 border rounded px-2 py-0.5 text-sm text-center"
+                  />
+                  <button
+                    onClick={()=>saveLimit(doctor)}
+                    className="bg-blue-600 text-white px-2 py-0.5 rounded text-xs"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={()=>setEditingLimit(null)}
+                    className="text-gray-400 text-xs"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ):(
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-gray-700">
+                    {dailyLimit} patients
+                  </span>
+                  <button
+                    onClick={()=>{
+                      setEditingLimit(doctor)
+                      setLimitInput(dailyLimit)
+                    }}
+                    className="text-blue-500 text-xs underline"
+                  >
+                    Change
+                  </button>
+                </div>
+              )}
+
+              <span className="text-xs text-gray-400 ml-auto">
+                {totalToday} booked today
+              </span>
 
             </div>
 
